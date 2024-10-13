@@ -1,0 +1,176 @@
+import pandas as pd
+from vnstock3 import Vnstock
+import os 
+import requests 
+import time 
+import numpy as np
+from backtesting import Strategy, Backtest
+import plotly.graph_objects as go
+import warnings
+warnings.filterwarnings("ignore")
+
+
+symbol = "HPG"
+stock = Vnstock().stock(symbol=symbol, source='TCBS')
+df = stock.quote.history(start='2024-01-01', end='2024-09-19', interval='1D')
+
+
+def rename_columns(df):
+    return df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'})
+
+def calculate_short_sma(df, period):
+    df['short_sma'] = df['Close'].rolling(window=period).mean()
+    return df
+
+def calculate_long_sma(df, period):
+    df['long_sma'] = df['Close'].rolling(window=period).mean()
+    return df
+
+def calculate_crossover_signals(df):
+    df['CrossAbove'] = (df['short_sma'] > df['long_sma']) & (df['short_sma'].shift(1) <= df['long_sma'].shift(1))
+    df['CrossBelow'] = (df['short_sma'] < df['long_sma']) & (df['short_sma'].shift(1) >= df['long_sma'].shift(1))
+    return df
+
+def plot_chart(df, start=00, end=None):
+    if end is None:
+        end = len(df)
+    
+    dfpl = df[start:end].reset_index()
+    fig = go.Figure(data=[
+        go.Candlestick(x=dfpl.index, open=dfpl.Open, high=dfpl.High, low=dfpl.Low, close=dfpl.Close),
+        go.Scatter(x=dfpl.index, y=dfpl.short_sma, line=dict(color='blue', width=1), name="short_sma"),
+        go.Scatter(x=dfpl.index, y=dfpl.long_sma, line=dict(color='red', width=1), name="long_sma")
+    ])
+    
+    # Thêm các điểm giao cắt vào biểu đồ
+    buy_signals = dfpl[dfpl.CrossAbove == True]
+    sell_signals = dfpl[dfpl.CrossBelow == True]
+    
+    fig.add_scatter(x=buy_signals.index, y=buy_signals.Low, mode="markers",
+                    marker=dict(size=10, color="green", symbol="triangle-up"), name="Mua")
+    fig.add_scatter(x=sell_signals.index, y=sell_signals.High, mode="markers",
+                    marker=dict(size=10, color="red", symbol="triangle-down"), name="Bán")
+    
+    fig.update_layout(title="Biểu đồ giá và tín hiệu giao cắt MA", xaxis_title="Thời gian", yaxis_title="Giá")
+    fig.show()
+
+class MyStrategy(Strategy):
+    def init(self):
+        self.short_ma = self.I(lambda: self.data.short_sma)
+        self.long_ma = self.I(lambda: self.data.long_sma)
+        self.position_size = 0.95  # Sử dụng 95% số dư có sẵn
+
+
+    def next(self):
+        if self.data.CrossAbove[-1]:
+            self.buy()
+        elif self.data.CrossBelow[-1]:
+            self.position.close()
+
+
+
+
+# Main execution
+if __name__ == "__main__":
+
+
+
+    ########################################################
+    # Load and process data
+    vn30 = stock.listing.symbols_by_group('VN30')
+    vn30 = vn30.tolist()
+    symbols = vn30
+
+    ########################################################
+
+
+    ########################################################
+    # list = stock.listing.all_symbols()
+    # #print (df)
+    # symbols =   list['ticker'].tolist()   # ở dòng này có thể thay bằng ['HPG', 'MWG" , 'nói chung là bất kì cái gì b muốn nhưng phải để trong dấu nháy đơn']
+    
+    ########################################################
+
+    ########################################################
+
+
+    # symbols = ['HPG','MWG']
+    ########################################################
+
+
+
+
+    # Tạo một danh sách để lưu kết quả
+    results_list = []
+    short_period = int (input ('nhập số của đường ma ngắn'))
+    long_period = int ( input ('nhập số của đường ma dài'))
+    count = 0 
+    for symbol in symbols : 
+        
+        symbol = symbol
+        stock = Vnstock().stock(symbol=symbol, source='TCBS')
+
+
+
+        # chỉnh thời gian backtest ở đây =))) 
+
+
+        df = stock.quote.history(start='2018-01-01', end='2024-09-19', interval='1D') 
+
+        #######################
+        df = rename_columns(df)
+        print (f' {count} đang backtest cổ phiếu {symbol}')
+        # Calculate indicators
+        df = calculate_short_sma(df, period = short_period)
+        df = calculate_long_sma (df,period = long_period)
+        df = calculate_crossover_signals(df)
+        
+        # Plot chart
+        # plot_chart(df)
+        
+        # Run backtest
+        # plot_chart (df)
+        bt = Backtest(df, MyStrategy, cash=100000, commission=.002)
+        stats = bt.run()
+        
+        stats['Symbol'] = symbol  # Thêm cột 'Symbol'
+
+        selected_metrics = {
+        'Symbol': symbol,
+        'short  MA ' : short_period, 
+        'long MA' : long_period,
+        'Return [%]            ': stats['Return [%]'],
+        'Win Rate [%]          ': stats['Win Rate [%]'],
+        'Best_Trade          '  : stats ['Best Trade [%]']    ,          
+        'Worst Trade [%]       ': stats ['Worst Trade [%]'],
+        'Buy n Hold return [%] ': stats ['Buy & Hold Return [%]'],
+        'Trades'                : stats['# Trades'],
+        'Max Drawdown [%]      ': stats['Max. Drawdown [%]'],
+        'Max Drawdown Duration' : stats ['Avg. Drawdown Duration'],
+        'Exposure Time [%]     ': stats ['Exposure Time [%]'],
+        'Avg. Trade [%]        ': stats ['Avg. Trade [%]'],
+        'Số ngày giữ lệnh trung bình': stats ['Avg. Trade Duration'],
+}
+
+        results_list.append(selected_metrics)  # Thêm kết quả vào danh sách
+
+
+
+        # print(stats)
+        # bt.plot()
+        count += 1 
+        time.sleep (3)
+        
+    
+    # Chuyển danh sách các kết quả thành DataFrame
+    results = pd.DataFrame(results_list)  # Tạo DataFrame từ danh sách các Series
+    
+    # Sắp xếp cột với 'Symbol' ở đầu tiên
+    cols = ['Symbol'] + [col for col in results.columns if col != 'Symbol']
+    results = results[cols]
+    results.dropna()
+    
+    # Lưu kết quả vào file CSV
+    results.to_csv('backtest_results4.csv', index=False)
+    print("Kết quả đã được lưu vào file 'backtest_results.csv'")
+
